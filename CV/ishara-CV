@@ -1,0 +1,788 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "4166627e",
+   "metadata": {
+    "_cell_guid": "b1076dfc-b9ad-4769-8c92-a6c4dae69d19",
+    "_uuid": "8f2839f25d086af736a60e9eeb907d3b93b6e0e5",
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:08:59.613933Z",
+     "iopub.status.busy": "2026-04-10T15:08:59.613615Z",
+     "iopub.status.idle": "2026-04-10T15:09:05.330839Z",
+     "shell.execute_reply": "2026-04-10T15:09:05.329792Z"
+    },
+    "papermill": {
+     "duration": 5.723454,
+     "end_time": "2026-04-10T15:09:05.332648+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:08:59.609194+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import torch\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "from torch.utils.data import Dataset, DataLoader\n",
+    "import torch.nn as nn\n",
+    "\n",
+    "KEY_POINTS_PATH = '/kaggle/input/datasets/seifeldeenamr/ishara-npy-keypoints/keypoints'\n",
+    "CSV_PATH = '/kaggle/input/datasets/seifeldeenamr/ishara-csv-dataset'"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "d51011b2",
+   "metadata": {
+    "papermill": {
+     "duration": 0.002218,
+     "end_time": "2026-04-10T15:09:05.337604+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:05.335386+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "# 1. Data Loader"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "bd17c323",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:05.343214Z",
+     "iopub.status.busy": "2026-04-10T15:09:05.342826Z",
+     "iopub.status.idle": "2026-04-10T15:09:05.352437Z",
+     "shell.execute_reply": "2026-04-10T15:09:05.351839Z"
+    },
+    "papermill": {
+     "duration": 0.013929,
+     "end_time": "2026-04-10T15:09:05.353750+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:05.339821+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import torch\n",
+    "import torch.nn as nn\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "from torch.utils.data import Dataset, DataLoader\n",
+    "from torch.nn.utils.rnn import pad_sequence\n",
+    "\n",
+    "class Vocab:\n",
+    "    def __init__(self, sentences):\n",
+    "        self.itos = {0: \"<PAD>\", 1: \"<SOS>\", 2: \"<EOS>\", 3: \"<UNK>\"}\n",
+    "        self.stoi = {v: k for k, v in self.itos.items()}\n",
+    "        \n",
+    "        for sentence in sentences:\n",
+    "            for word in str(sentence).split():\n",
+    "                if word not in self.stoi:\n",
+    "                    self.stoi[word] = len(self.stoi)\n",
+    "                    self.itos[len(self.itos)] = word\n",
+    "    \n",
+    "    def encode(self, text):\n",
+    "        return [self.stoi[\"<SOS>\"]] + [self.stoi.get(w, self.stoi[\"<UNK>\"]) for w in str(text).split()] + [self.stoi[\"<EOS>\"]]\n",
+    "\n",
+    "class SignDataset(Dataset):\n",
+    "    def __init__(self, csv_path, npy_dir, vocab):\n",
+    "        self.df = pd.read_csv(csv_path)\n",
+    "        self.npy_dir = npy_dir\n",
+    "        self.vocab = vocab\n",
+    "\n",
+    "    def __len__(self):\n",
+    "        return len(self.df)\n",
+    "\n",
+    "    def __getitem__(self, idx):\n",
+    "        row = self.df.iloc[idx]\n",
+    "        kp = np.load(f\"{self.npy_dir}/{row['sample_id']}.npy\")\n",
+    "        if kp is None:\n",
+    "            return\n",
+    "        text = self.vocab.encode(row['sentence'])\n",
+    "        return torch.tensor(kp, dtype=torch.float32), torch.tensor(text, dtype=torch.long)\n",
+    "\n",
+    "def collate_fn(batch):\n",
+    "    kps, texts = zip(*batch)\n",
+    "    kps_padded = pad_sequence(kps, batch_first=True, padding_value=0.0)\n",
+    "    texts_padded = pad_sequence(texts, batch_first=True, padding_value=0)\n",
+    "    return kps_padded, texts_padded"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "4e7f80a5",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:05.359175Z",
+     "iopub.status.busy": "2026-04-10T15:09:05.358834Z",
+     "iopub.status.idle": "2026-04-10T15:09:05.369117Z",
+     "shell.execute_reply": "2026-04-10T15:09:05.368494Z"
+    },
+    "papermill": {
+     "duration": 0.014732,
+     "end_time": "2026-04-10T15:09:05.370523+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:05.355791+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import math\n",
+    "\n",
+    "class PositionalEncoding(nn.Module):\n",
+    "    def __init__(self, d_model, max_len=500):\n",
+    "        super().__init__()\n",
+    "        pe = torch.zeros(max_len, d_model)\n",
+    "        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)\n",
+    "        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))\n",
+    "        pe[:, 0::2] = torch.sin(position * div_term)\n",
+    "        pe[:, 1::2] = torch.cos(position * div_term)\n",
+    "        self.register_buffer('pe', pe.unsqueeze(0))\n",
+    "\n",
+    "    def forward(self, x):\n",
+    "        return x + self.pe[:, :x.size(1)]\n",
+    "\n",
+    "class SignLanguageTransformer(nn.Module):\n",
+    "    def __init__(self, input_dim, model_dim, nhead, num_layers, vocab_size):\n",
+    "        super().__init__()\n",
+    "        self.model_dim = model_dim\n",
+    "        self.embedding = nn.Linear(input_dim, model_dim)\n",
+    "        self.pos_encoder = PositionalEncoding(model_dim)\n",
+    "        self.target_embedding = nn.Embedding(vocab_size, model_dim)\n",
+    "        \n",
+    "        self.transformer = nn.Transformer(\n",
+    "            d_model=model_dim, \n",
+    "            nhead=nhead, \n",
+    "            num_encoder_layers=num_layers, \n",
+    "            num_decoder_layers=num_layers,\n",
+    "            batch_first=True\n",
+    "        )\n",
+    "        self.fc_out = nn.Linear(model_dim, vocab_size)\n",
+    "\n",
+    "    def generate_mask(self, sz):\n",
+    "        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)\n",
+    "        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))\n",
+    "        return mask\n",
+    "\n",
+    "    def forward(self, src, trg):\n",
+    "        src_mask = None\n",
+    "        trg_mask = self.generate_mask(trg.size(1)).to(src.device)\n",
+    "        \n",
+    "        src = self.pos_encoder(self.embedding(src) * math.sqrt(self.model_dim))\n",
+    "        trg = self.pos_encoder(self.target_embedding(trg) * math.sqrt(self.model_dim))\n",
+    "        \n",
+    "        output = self.transformer(src, trg, src_mask, trg_mask)\n",
+    "        return self.fc_out(output)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "26afc845",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:05.376461Z",
+     "iopub.status.busy": "2026-04-10T15:09:05.376087Z",
+     "iopub.status.idle": "2026-04-10T15:09:05.382146Z",
+     "shell.execute_reply": "2026-04-10T15:09:05.381464Z"
+    },
+    "papermill": {
+     "duration": 0.010894,
+     "end_time": "2026-04-10T15:09:05.383615+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:05.372721+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "def train(epochs):\n",
+    "    model.train()\n",
+    "    history = {\"loss\": [], \"acc\": []}\n",
+    "    \n",
+    "    for epoch in range(epochs):\n",
+    "        model.train()\n",
+    "        epoch_loss = 0\n",
+    "        epoch_acc = 0\n",
+    "        \n",
+    "        for src, trg in loader:\n",
+    "            src, trg = src.to(device), trg.to(device)\n",
+    "            optimizer.zero_grad()\n",
+    "            \n",
+    "            output = model(src, trg[:, :-1])\n",
+    "            loss = criterion(output.reshape(-1, output.shape[-1]), trg[:, 1:].reshape(-1))\n",
+    "            \n",
+    "            acc = get_accuracy(output, trg[:, 1:])\n",
+    "            \n",
+    "            loss.backward()\n",
+    "            optimizer.step()\n",
+    "            \n",
+    "            epoch_loss += loss.item()\n",
+    "            epoch_acc += acc.item()\n",
+    "    \n",
+    "        avg_loss = epoch_loss / len(loader)\n",
+    "        avg_acc = epoch_acc / len(loader)\n",
+    "        \n",
+    "        history[\"loss\"].append(avg_loss)\n",
+    "        history[\"acc\"].append(avg_acc)\n",
+    "        \n",
+    "        print(f\"Epoch {epoch+1}: Loss = {avg_loss:.4f}, Acc = {avg_acc:.4f}\")\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "f5cab61f",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:05.389248Z",
+     "iopub.status.busy": "2026-04-10T15:09:05.388786Z",
+     "iopub.status.idle": "2026-04-10T15:09:05.696737Z",
+     "shell.execute_reply": "2026-04-10T15:09:05.695891Z"
+    },
+    "papermill": {
+     "duration": 0.312503,
+     "end_time": "2026-04-10T15:09:05.698364+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:05.385861+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>sample_id</th>\n",
+       "      <th>video_path</th>\n",
+       "      <th>gloss</th>\n",
+       "      <th>sentence</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>00_0001</td>\n",
+       "      <td>/kaggle/input/datasets/seifeldeenamr/ishara-pa...</td>\n",
+       "      <td>سوال هو</td>\n",
+       "      <td>من هو</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>00_0002</td>\n",
+       "      <td>/kaggle/input/datasets/seifeldeenamr/ishara-pa...</td>\n",
+       "      <td>هو معلم لغه اشاره</td>\n",
+       "      <td>هو مدرس لغه اشاره</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>00_0003</td>\n",
+       "      <td>/kaggle/input/datasets/seifeldeenamr/ishara-pa...</td>\n",
+       "      <td>استفهام هو معلم هو</td>\n",
+       "      <td>هل انت مدرس</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>3</th>\n",
+       "      <td>00_0004</td>\n",
+       "      <td>/kaggle/input/datasets/seifeldeenamr/ishara-pa...</td>\n",
+       "      <td>هو معلم لا انا مدرسه</td>\n",
+       "      <td>انت لست مدرس انا طالب</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>4</th>\n",
+       "      <td>00_0005</td>\n",
+       "      <td>/kaggle/input/datasets/seifeldeenamr/ishara-pa...</td>\n",
+       "      <td>هو سوال</td>\n",
+       "      <td>هو من</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>...</th>\n",
+       "      <td>...</td>\n",
+       "      <td>...</td>\n",
+       "      <td>...</td>\n",
+       "      <td>...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5995</th>\n",
+       "      <td>14_0396</td>\n",
+       "      <td>/kaggle/input/datasets/bodabo42/eshara-part2/e...</td>\n",
+       "      <td>هو عمل سوال</td>\n",
+       "      <td>ماذا تعمل</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5996</th>\n",
+       "      <td>14_0397</td>\n",
+       "      <td>/kaggle/input/datasets/bodabo42/eshara-part2/e...</td>\n",
+       "      <td>انا صم</td>\n",
+       "      <td>انا اصم</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5997</th>\n",
+       "      <td>14_0398</td>\n",
+       "      <td>/kaggle/input/datasets/bodabo42/eshara-part2/e...</td>\n",
+       "      <td>استفهام هو صم</td>\n",
+       "      <td>هل انت اصم</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5998</th>\n",
+       "      <td>14_0399</td>\n",
+       "      <td>/kaggle/input/datasets/bodabo42/eshara-part2/e...</td>\n",
+       "      <td>استفهام هو زوج</td>\n",
+       "      <td>هل انت متزوج</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5999</th>\n",
+       "      <td>14_0400</td>\n",
+       "      <td>/kaggle/input/datasets/bodabo42/eshara-part2/e...</td>\n",
+       "      <td>كل_يوم صباح مشي وقت اثنان</td>\n",
+       "      <td>يوميا في الصباح امشي لمده ساعتين</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "<p>6000 rows × 4 columns</p>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "     sample_id                                         video_path  \\\n",
+       "0      00_0001  /kaggle/input/datasets/seifeldeenamr/ishara-pa...   \n",
+       "1      00_0002  /kaggle/input/datasets/seifeldeenamr/ishara-pa...   \n",
+       "2      00_0003  /kaggle/input/datasets/seifeldeenamr/ishara-pa...   \n",
+       "3      00_0004  /kaggle/input/datasets/seifeldeenamr/ishara-pa...   \n",
+       "4      00_0005  /kaggle/input/datasets/seifeldeenamr/ishara-pa...   \n",
+       "...        ...                                                ...   \n",
+       "5995   14_0396  /kaggle/input/datasets/bodabo42/eshara-part2/e...   \n",
+       "5996   14_0397  /kaggle/input/datasets/bodabo42/eshara-part2/e...   \n",
+       "5997   14_0398  /kaggle/input/datasets/bodabo42/eshara-part2/e...   \n",
+       "5998   14_0399  /kaggle/input/datasets/bodabo42/eshara-part2/e...   \n",
+       "5999   14_0400  /kaggle/input/datasets/bodabo42/eshara-part2/e...   \n",
+       "\n",
+       "                          gloss                          sentence  \n",
+       "0                       سوال هو                             من هو  \n",
+       "1             هو معلم لغه اشاره                 هو مدرس لغه اشاره  \n",
+       "2            استفهام هو معلم هو                       هل انت مدرس  \n",
+       "3          هو معلم لا انا مدرسه             انت لست مدرس انا طالب  \n",
+       "4                       هو سوال                             هو من  \n",
+       "...                         ...                               ...  \n",
+       "5995                هو عمل سوال                         ماذا تعمل  \n",
+       "5996                     انا صم                           انا اصم  \n",
+       "5997              استفهام هو صم                        هل انت اصم  \n",
+       "5998             استفهام هو زوج                      هل انت متزوج  \n",
+       "5999  كل_يوم صباح مشي وقت اثنان  يوميا في الصباح امشي لمده ساعتين  \n",
+       "\n",
+       "[6000 rows x 4 columns]"
+      ]
+     },
+     "execution_count": 5,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "device = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+    "INPUT_DIM = 225\n",
+    "MODEL_DIM = 256\n",
+    "NHEAD = 8\n",
+    "NUM_LAYERS = 3\n",
+    "BATCH_SIZE = 32\n",
+    "LR = 0.0001\n",
+    "\n",
+    "train_df = pd.read_csv(f'{CSV_PATH}/train.csv')\n",
+    "train_df\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "d87d8a6c",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:05.704463Z",
+     "iopub.status.busy": "2026-04-10T15:09:05.704123Z",
+     "iopub.status.idle": "2026-04-10T15:09:11.432697Z",
+     "shell.execute_reply": "2026-04-10T15:09:11.432069Z"
+    },
+    "papermill": {
+     "duration": 5.733491,
+     "end_time": "2026-04-10T15:09:11.434329+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:05.700838+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "vocab = Vocab(train_df['sentence'])\n",
+    "train_dataset = SignDataset(f'{CSV_PATH}/train.csv', KEY_POINTS_PATH, vocab)\n",
+    "test_dataset = SignDataset(f'{CSV_PATH}/test.csv', KEY_POINTS_PATH, vocab)\n",
+    "train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)\n",
+    "test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)\n",
+    "\n",
+    "\n",
+    "model = SignLanguageTransformer(INPUT_DIM, MODEL_DIM, NHEAD, NUM_LAYERS, len(vocab.stoi)).to(device)\n",
+    "optimizer = torch.optim.Adam(model.parameters(), lr=LR)\n",
+    "criterion = nn.CrossEntropyLoss(ignore_index=0)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "ffa31830",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:11.441604Z",
+     "iopub.status.busy": "2026-04-10T15:09:11.441264Z",
+     "iopub.status.idle": "2026-04-10T15:09:11.448551Z",
+     "shell.execute_reply": "2026-04-10T15:09:11.447765Z"
+    },
+    "papermill": {
+     "duration": 0.012311,
+     "end_time": "2026-04-10T15:09:11.450267+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:11.437956+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "def predict(model, vocab, npy_input, max_len=20, device='cpu'):\n",
+    "    model.eval()\n",
+    "    \n",
+    "    if isinstance(npy_input, str):\n",
+    "        kp = np.load(npy_input)\n",
+    "    else:\n",
+    "        kp = npy_input \n",
+    "        \n",
+    "    src = torch.tensor(kp, dtype=torch.float32).unsqueeze(0).to(device)\n",
+    "    with torch.no_grad():\n",
+    "        src_emb = model.pos_encoder(model.embedding(src) * math.sqrt(model.model_dim))\n",
+    "        memory = model.transformer.encoder(src_emb)\n",
+    "    \n",
+    "    ys = torch.ones(1, 1).fill_(vocab.stoi[\"<SOS>\"]).type(torch.long).to(device)\n",
+    "    \n",
+    "    generated_words = []\n",
+    "    \n",
+    "    for i in range(max_len):\n",
+    "        with torch.no_grad():\n",
+    "            trg_mask = model.generate_mask(ys.size(1)).to(device)\n",
+    "            out_emb = model.pos_encoder(model.target_embedding(ys) * math.sqrt(model.model_dim))\n",
+    "            \n",
+    "            out = model.transformer.decoder(out_emb, memory, tgt_mask=trg_mask)\n",
+    "            prob = model.fc_out(out[:, -1])\n",
+    "            \n",
+    "            _, next_word = torch.max(prob, dim=1)\n",
+    "            next_word = next_word.item()\n",
+    "            \n",
+    "            if next_word == vocab.stoi[\"<EOS>\"]:\n",
+    "                break\n",
+    "                \n",
+    "            generated_words.append(vocab.itos[next_word])\n",
+    "            \n",
+    "            ys = torch.cat([ys, torch.ones(1, 1).type_as(ys.data).fill_(next_word)], dim=1)\n",
+    "            \n",
+    "    return \" \".join(generated_words)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "cc43c40d",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:11.455740Z",
+     "iopub.status.busy": "2026-04-10T15:09:11.455452Z",
+     "iopub.status.idle": "2026-04-10T15:09:17.464999Z",
+     "shell.execute_reply": "2026-04-10T15:09:17.464053Z"
+    },
+    "papermill": {
+     "duration": 6.014135,
+     "end_time": "2026-04-10T15:09:17.466614+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:11.452479+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Collecting jiwer\r\n",
+      "  Downloading jiwer-4.0.0-py3-none-any.whl.metadata (3.3 kB)\r\n",
+      "Requirement already satisfied: click>=8.1.8 in /usr/local/lib/python3.12/dist-packages (from jiwer) (8.3.1)\r\n",
+      "Collecting rapidfuzz>=3.9.7 (from jiwer)\r\n",
+      "  Downloading rapidfuzz-3.14.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (12 kB)\r\n",
+      "Downloading jiwer-4.0.0-py3-none-any.whl (23 kB)\r\n",
+      "Downloading rapidfuzz-3.14.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (3.1 MB)\r\n",
+      "\u001b[2K   \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m3.1/3.1 MB\u001b[0m \u001b[31m36.8 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\r\n",
+      "\u001b[?25hInstalling collected packages: rapidfuzz, jiwer\r\n",
+      "Successfully installed jiwer-4.0.0 rapidfuzz-3.14.5\r\n",
+      "Note: you may need to restart the kernel to use updated packages.\n"
+     ]
+    }
+   ],
+   "source": [
+    "%pip install jiwer"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "1584eafe",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:17.473913Z",
+     "iopub.status.busy": "2026-04-10T15:09:17.473431Z",
+     "iopub.status.idle": "2026-04-10T15:09:17.498906Z",
+     "shell.execute_reply": "2026-04-10T15:09:17.498366Z"
+    },
+    "papermill": {
+     "duration": 0.030743,
+     "end_time": "2026-04-10T15:09:17.500249+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:17.469506+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import matplotlib.pyplot as plt\n",
+    "from jiwer import wer\n",
+    "\n",
+    "def evaluate_performance(model, data_loader, vocab, device):\n",
+    "    model.eval()\n",
+    "    all_preds = []\n",
+    "    all_refs = []\n",
+    "    total_acc = 0\n",
+    "    \n",
+    "    with torch.no_grad():\n",
+    "        for src, trg in data_loader:\n",
+    "            src, trg = src.to(device), trg.to(device)\n",
+    "            \n",
+    "            output = model(src, trg[:, :-1])\n",
+    "            predictions = torch.argmax(output, dim=-1)\n",
+    "            \n",
+    "            correct = (predictions == trg[:, 1:]).float()\n",
+    "            mask = (trg[:, 1:] != 0).float()\n",
+    "            acc = (correct * mask).sum() / mask.sum()\n",
+    "            total_acc += acc.item()\n",
+    "\n",
+    "            for i in range(src.size(0)):\n",
+    "                pred_sentence = predict(model, vocab, src[i].cpu().numpy(), device=device)\n",
+    "                \n",
+    "                ref_sentence = \" \".join([vocab.itos[t.item()] for t in trg[i] if t.item() not in [0, 1, 2]])\n",
+    "                \n",
+    "                all_preds.append(pred_sentence)\n",
+    "                all_refs.append(ref_sentence)\n",
+    "\n",
+    "    avg_acc = total_acc / len(data_loader)\n",
+    "    avg_wer = wer(all_refs, all_preds)\n",
+    "    \n",
+    "    return avg_acc, avg_wer"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "id": "474b0133",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:17.506697Z",
+     "iopub.status.busy": "2026-04-10T15:09:17.506370Z",
+     "iopub.status.idle": "2026-04-10T15:09:17.511208Z",
+     "shell.execute_reply": "2026-04-10T15:09:17.510585Z"
+    },
+    "papermill": {
+     "duration": 0.009698,
+     "end_time": "2026-04-10T15:09:17.512579+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:17.502881+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "def plot_curves(train_losses, train_accs):\n",
+    "    epochs = range(1, len(train_losses) + 1)\n",
+    "    \n",
+    "    plt.figure(figsize=(12, 5))\n",
+    "\n",
+    "    plt.subplot(1, 2, 1)\n",
+    "    plt.plot(epochs, train_losses, 'r-o', label='Training Loss')\n",
+    "    plt.title('Training Loss Curve')\n",
+    "    plt.xlabel('Epochs')\n",
+    "    plt.ylabel('Loss')\n",
+    "    plt.legend()\n",
+    "\n",
+    "    plt.subplot(1, 2, 2)\n",
+    "    plt.plot(epochs, train_accs, 'b-o', label='Training Accuracy')\n",
+    "    plt.title('Training Accuracy Curve')\n",
+    "    plt.xlabel('Epochs')\n",
+    "    plt.ylabel('Accuracy')\n",
+    "    plt.legend()\n",
+    "\n",
+    "    plt.tight_layout()\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "id": "97c54cdb",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:09:17.519212Z",
+     "iopub.status.busy": "2026-04-10T15:09:17.518868Z",
+     "iopub.status.idle": "2026-04-10T15:16:23.989317Z",
+     "shell.execute_reply": "2026-04-10T15:16:23.988410Z"
+    },
+    "papermill": {
+     "duration": 426.478715,
+     "end_time": "2026-04-10T15:16:23.994091+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:09:17.515376+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Final WER: 5.217580504786771\n"
+     ]
+    }
+   ],
+   "source": [
+    "final_acc, final_wer = evaluate_performance(model, train_loader, vocab, device)\n",
+    "print(f\"Final WER: {final_wer}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "id": "2a2a58ab",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-04-10T15:16:24.001270Z",
+     "iopub.status.busy": "2026-04-10T15:16:24.000500Z",
+     "iopub.status.idle": "2026-04-10T15:16:24.004320Z",
+     "shell.execute_reply": "2026-04-10T15:16:24.003643Z"
+    },
+    "papermill": {
+     "duration": 0.00907,
+     "end_time": "2026-04-10T15:16:24.005832+00:00",
+     "exception": false,
+     "start_time": "2026-04-10T15:16:23.996762+00:00",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# # حفظ الأوزان\n",
+    "# torch.save(model.state_dict(), 'sign_language_transformer_v1.pth')\n",
+    "\n",
+    "# # حفظ القاموس (عشان الأرقام متتغيرش المرة الجاية)\n",
+    "# import pickle\n",
+    "# with open('vocab.pkl', 'wb') as f:\n",
+    "#     pickle.dump(vocab, f)\n",
+    "\n",
+    "# print(\"Model and Vocab saved successfully!\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "kaggle": {
+   "accelerator": "nvidiaTeslaT4",
+   "dataSources": [
+    {
+     "databundleVersionId": 16475148,
+     "datasetId": 9946273,
+     "sourceId": 15546242,
+     "sourceType": "datasetVersion"
+    },
+    {
+     "databundleVersionId": 16198169,
+     "datasetId": 9783587,
+     "sourceId": 15295066,
+     "sourceType": "datasetVersion"
+    }
+   ],
+   "dockerImageVersionId": 31328,
+   "isGpuEnabled": true,
+   "isInternetEnabled": true,
+   "language": "python",
+   "sourceType": "notebook"
+  },
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.12.12"
+  },
+  "papermill": {
+   "default_parameters": {},
+   "duration": 450.19973,
+   "end_time": "2026-04-10T15:16:27.257545+00:00",
+   "environment_variables": {},
+   "exception": null,
+   "input_path": "__notebook__.ipynb",
+   "output_path": "__notebook__.ipynb",
+   "parameters": {},
+   "start_time": "2026-04-10T15:08:57.057815+00:00",
+   "version": "2.7.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
