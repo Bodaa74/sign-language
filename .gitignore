@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Data (large files)
+data/raw/
+data/processed/
+data/augmented/
+
+# Model weights (track via DVC or cloud storage)
+model/saved/*.keras
+model/saved/*.tflite
+model/checkpoints/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+*.csv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env
+.env

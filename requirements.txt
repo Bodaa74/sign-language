@@ -1,0 +1,36 @@
+# ═══════════════════════════════════════════
+#  ASL Sign Language Translator — Requirements
+#  Python 3.10+
+# ═══════════════════════════════════════════
+
+# ── Deep Learning ──────────────────────────
+tensorflow==2.15.0
+keras==2.15.0
+
+# ── Computer Vision ────────────────────────
+opencv-python-headless==4.9.0.80
+mediapipe==0.10.9
+
+# ── Web Framework ──────────────────────────
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9      # File uploads
+websockets==12.0
+
+# ── Data Science ───────────────────────────
+numpy==1.26.4
+scikit-learn==1.7.2
+matplotlib==3.8.3
+seaborn==0.13.2
+Pillow==10.2.0
+tqdm==4.66.2
+pandas==2.2.1
+
+# ── Utilities ──────────────────────────────
+pydantic==2.6.3
+python-dotenv==1.0.1
+aiofiles==23.2.1
+
+# ── Notebooks ──────────────────────────────
+jupyter==1.0.0
+ipykernel==6.29.3
