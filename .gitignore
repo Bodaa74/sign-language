@@ -14,11 +14,6 @@ data/raw/
 data/processed/
 data/augmented/
 
-# Model weights (track via DVC or cloud storage)
-model/saved/*.keras
-model/saved/*.tflite
-model/checkpoints/
-
 # Node
 frontend/node_modules/
 frontend/dist/
