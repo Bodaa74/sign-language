@@ -1,20 +1,6 @@
 """
-ASL Sign Language Translator - Real-Time Detection Engine
-==========================================================
-Uses MediaPipe Hands for robust hand detection and cropping,
-then classifies the ROI with the trained MobileNetV2 model.
-
-Features:
-  • MediaPipe Hands for precise hand landmark detection
-  • Temporal smoothing (majority vote over last N frames)
-  • Word accumulation with space-bar support
-  • Basic NLP word completion suggestions
-  • Auto-pause when hand leaves frame
-
-Usage:
-  python scripts/detect.py --model model/saved/asl_model_final.keras
+ASL Sign Language Translator - Real-Time Detection Engine (Corrected)
 """
-
 import cv2
 import numpy as np
 import json
@@ -30,18 +16,15 @@ import tensorflow as tf
 # Config
 # ─────────────────────────────────────────────
 IMG_SIZE          = 224
-SMOOTHING_WINDOW  = 10    # Frames for majority-vote smoothing
-CONFIDENCE_THRESH = 0.75  # Minimum model confidence to accept prediction
-HOLD_FRAMES       = 15    # Frames a letter must be stable before appending
-HAND_PADDING      = 30    # Pixels to expand hand bounding box
-
-# Basic NLP: top-N word completions from a simple frequency dict
+SMOOTHING_WINDOW  = 10    
+CONFIDENCE_THRESH = 0.5  
+HOLD_FRAMES       = 15    
+HAND_PADDING      = 40    
 WORD_SUGGESTIONS = 3
 
 # ─────────────────────────────────────────────
-# NLP Suggestion Engine (lightweight)
+# NLP Suggestion Engine
 # ─────────────────────────────────────────────
-
 COMMON_WORDS = [
     "APPLE", "BALL", "CAT", "DOG", "EGG", "FISH", "GOOD", "HELLO", "ICE",
     "JAM", "KITE", "LOVE", "MORE", "NICE", "OPEN", "PEN", "QUEEN", "RED",
@@ -56,33 +39,26 @@ COMMON_WORDS = [
     "HAS", "HAVE", "HEAD", "HIGH", "HILL", "HOME", "HOW", "HURT",
 ]
 
-
 def get_word_suggestions(prefix: str, n: int = WORD_SUGGESTIONS) -> list[str]:
     prefix = prefix.upper()
     if not prefix:
         return []
     return [w for w in COMMON_WORDS if w.startswith(prefix)][:n]
 
-
 # ─────────────────────────────────────────────
 # Model + Label Map Loader
 # ─────────────────────────────────────────────
-
 def load_model_and_labels(model_path: str):
     model = tf.keras.models.load_model(model_path)
-
     label_path = Path(model_path).parent / "label_map.json"
     with open(label_path) as f:
-        label_map = json.load(f)   # {'A': 0, 'B': 1, ...}
-
+        label_map = json.load(f)
     idx_to_label = {v: k for k, v in label_map.items()}
     return model, idx_to_label
-
 
 # ─────────────────────────────────────────────
 # Hand Detector (MediaPipe)
 # ─────────────────────────────────────────────
-
 class HandDetector:
     def __init__(self):
         self.mp_hands    = mp.solutions.hands
@@ -95,49 +71,34 @@ class HandDetector:
         )
 
     def detect(self, frame_rgb: np.ndarray):
-        """Returns (landmarks_result, annotated_frame)."""
-        result = self.hands.process(frame_rgb)
-        return result
+        return self.hands.process(frame_rgb)
 
     def get_hand_bbox(self, result, frame_shape, padding=HAND_PADDING):
-        """
-        Compute bounding box around detected hand landmarks.
-        Returns (x1, y1, x2, y2) or None if no hand found.
-        """
         if not result.multi_hand_landmarks:
             return None
-
         h, w = frame_shape[:2]
         lms = result.multi_hand_landmarks[0].landmark
         xs  = [int(lm.x * w) for lm in lms]
         ys  = [int(lm.y * h) for lm in lms]
-
         x1 = max(0,     min(xs) - padding)
         y1 = max(0,     min(ys) - padding)
         x2 = min(w - 1, max(xs) + padding)
         y2 = min(h - 1, max(ys) + padding)
-
         return (x1, y1, x2, y2)
 
     def draw_landmarks(self, frame_bgr: np.ndarray, result):
         if result.multi_hand_landmarks:
             for hand_lms in result.multi_hand_landmarks:
                 self.mp_draw.draw_landmarks(
-                    frame_bgr,
-                    hand_lms,
-                    self.mp_hands.HAND_CONNECTIONS,
+                    frame_bgr, hand_lms, self.mp_hands.HAND_CONNECTIONS,
                     self.mp_draw.DrawingSpec(color=(0, 255, 200), thickness=2, circle_radius=3),
                     self.mp_draw.DrawingSpec(color=(255, 255, 0), thickness=2),
                 )
 
-
 # ─────────────────────────────────────────────
 # Prediction Smoother
 # ─────────────────────────────────────────────
-
 class PredictionSmoother:
-    """Majority-vote over a sliding window of raw predictions."""
-
     def __init__(self, window: int = SMOOTHING_WINDOW):
         self.window   = window
         self.history  = deque(maxlen=window)
@@ -145,10 +106,8 @@ class PredictionSmoother:
     def update(self, label: str, confidence: float) -> tuple[str, float]:
         if confidence >= CONFIDENCE_THRESH:
             self.history.append(label)
-
         if not self.history:
             return ("", 0.0)
-
         counts       = Counter(self.history)
         best_label   = counts.most_common(1)[0][0]
         smoothed_conf = counts[best_label] / len(self.history)
@@ -157,49 +116,34 @@ class PredictionSmoother:
     def reset(self):
         self.history.clear()
 
-
 # ─────────────────────────────────────────────
 # Frame Preprocessor
 # ─────────────────────────────────────────────
-
 def preprocess_roi(roi: np.ndarray) -> np.ndarray:
-    """Resize, normalize, and expand dims for model input."""
     roi = cv2.resize(roi, (IMG_SIZE, IMG_SIZE))
     roi = roi.astype(np.float32) / 255.0
-    return np.expand_dims(roi, axis=0)   # (1, 224, 224, 3)
-
+    return np.expand_dims(roi, axis=0)
 
 # ─────────────────────────────────────────────
 # HUD Renderer
 # ─────────────────────────────────────────────
-
 def draw_hud(frame, letter, conf, word, suggestions, fps, hand_visible):
     h, w = frame.shape[:2]
     overlay = frame.copy()
-
-    # Semi-transparent bottom panel
     cv2.rectangle(overlay, (0, h - 160), (w, h), (15, 15, 30), -1)
     cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
-
-    # Top-right FPS
     cv2.putText(frame, f"FPS: {fps:.0f}", (w - 110, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
-
-    # Hand status indicator
     status_color = (0, 230, 100) if hand_visible else (0, 60, 200)
     status_text  = "HAND DETECTED" if hand_visible else "NO HAND"
     cv2.circle(frame, (20, 20), 8, status_color, -1)
     cv2.putText(frame, status_text, (35, 26),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 1, cv2.LINE_AA)
-
-    # Current letter (big)
     letter_display = letter if letter else "—"
     cv2.putText(frame, letter_display, (30, h - 80),
                 cv2.FONT_HERSHEY_DUPLEX, 3.8, (255, 255, 255), 5, cv2.LINE_AA)
     cv2.putText(frame, letter_display, (30, h - 80),
                 cv2.FONT_HERSHEY_DUPLEX, 3.8, (0, 230, 200), 2, cv2.LINE_AA)
-
-    # Confidence bar
     if letter:
         bar_x, bar_y, bar_w, bar_h = 140, h - 120, 200, 16
         cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (60, 60, 60), -1)
@@ -210,8 +154,6 @@ def draw_hud(frame, letter, conf, word, suggestions, fps, hand_visible):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1, cv2.LINE_AA)
         cv2.putText(frame, "Confidence", (bar_x, bar_y - 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (150, 150, 150), 1, cv2.LINE_AA)
-
-    # Formed word
     word_display = word if word else "_"
     cv2.putText(frame, "WORD:", (350, h - 115),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.50, (140, 140, 140), 1, cv2.LINE_AA)
@@ -219,8 +161,6 @@ def draw_hud(frame, letter, conf, word, suggestions, fps, hand_visible):
                 cv2.FONT_HERSHEY_SIMPLEX, 1.40, (255, 255, 255), 3, cv2.LINE_AA)
     cv2.putText(frame, word_display, (350, h - 75),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.40, (255, 220, 80), 1, cv2.LINE_AA)
-
-    # Suggestions
     if suggestions:
         cv2.putText(frame, "Suggestions:", (350, h - 42),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (120, 120, 120), 1, cv2.LINE_AA)
@@ -229,19 +169,14 @@ def draw_hud(frame, letter, conf, word, suggestions, fps, hand_visible):
             cv2.putText(frame, sug, (sx, h - 28),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.50, (100, 200, 255), 1, cv2.LINE_AA)
             sx += len(sug) * 13 + 18
-
-    # Controls hint
     controls = "[SPACE] add space  [BACKSPACE] delete  [ENTER] clear word  [Q] quit"
     cv2.putText(frame, controls, (10, h - 8),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.38, (90, 90, 90), 1, cv2.LINE_AA)
-
     return frame
 
-
 # ─────────────────────────────────────────────
-# Main Detect Loop
+# Main Detect Loop (Corrected Hold Logic)
 # ─────────────────────────────────────────────
-
 def run_detection(model_path: str, camera_index: int = 0):
     print("🔄 Loading model …")
     model, idx_to_label = load_model_and_labels(model_path)
@@ -273,10 +208,9 @@ def run_detection(model_path: str, camera_index: int = 0):
             print("⚠️  Camera read failed.")
             break
 
-        frame = cv2.flip(frame, 1)   # Mirror for natural interaction
+        frame = cv2.flip(frame, 1)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Hand detection
         result      = detector.detect(frame_rgb)
         hand_visible = result.multi_hand_landmarks is not None
         bbox         = detector.get_hand_bbox(result, frame.shape)
@@ -293,16 +227,15 @@ def run_detection(model_path: str, camera_index: int = 0):
                 top_idx      = np.argmax(preds)
                 raw_conf     = float(preds[top_idx])
                 raw_label    = idx_to_label[top_idx]
-
                 letter, conf = smoother.update(raw_label, raw_conf)
 
-                # Draw bounding box
+                # رسم المربع
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 230, 200), 2)
                 cv2.rectangle(frame, (x1, y1 - 28), (x2, y1), (0, 230, 200), -1)
                 cv2.putText(frame, f"{letter} {conf*100:.0f}%", (x1 + 4, y1 - 8),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2, cv2.LINE_AA)
 
-            # Stability counter for auto-append
+            # ✅ المنطق الصحيح للثبات (HOLD_FRAMES)
             if letter == current_letter and letter != "":
                 stable_count += 1
             else:
@@ -312,39 +245,33 @@ def run_detection(model_path: str, camera_index: int = 0):
             if stable_count >= HOLD_FRAMES and letter != last_appended:
                 word          += letter
                 last_appended  = letter
-                stable_count   = 0
+                stable_count   = 0  # إعادة تعيين العداد بعد الإضافة
         else:
             smoother.reset()
             last_appended = ""
 
-        # Draw hand landmarks
         detector.draw_landmarks(frame, result)
-
-        # Word suggestions
         suggestions = get_word_suggestions(word)
 
-        # FPS
         fps_counter.append(time.time() - t0)
         fps = 1.0 / (sum(fps_counter) / len(fps_counter)) if fps_counter else 0
 
-        # HUD
         frame = draw_hud(frame, letter, conf, word, suggestions, fps, hand_visible)
-
         cv2.imshow("ASL Sign Language Translator", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
-        elif key == 32:     # SPACE — finalize word into sentence
+        elif key == 32:
             if word:
                 sentence += word + " "
                 print(f"📝 Word added: {word}  |  Sentence: {sentence.strip()}")
                 word = ""
                 last_appended = ""
-        elif key == 8:      # BACKSPACE — delete last letter
+        elif key == 8:
             word = word[:-1]
             last_appended = word[-1] if word else ""
-        elif key == 13:     # ENTER — clear current word
+        elif key == 13:
             word = ""
             last_appended = ""
 
@@ -352,11 +279,9 @@ def run_detection(model_path: str, camera_index: int = 0):
     cv2.destroyAllWindows()
     print(f"\n📝 Final sentence: {sentence.strip()}")
 
-
 # ─────────────────────────────────────────────
 # Entry
 # ─────────────────────────────────────────────
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ASL Real-Time Detector")
     parser.add_argument("--model",  default="model/saved/asl_model_final.keras")

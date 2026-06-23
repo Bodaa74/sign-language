@@ -1,18 +1,20 @@
-# Sign Language Translator
+# 🤟 ASL Sign Language Translator (A–Z)
 
 > Real-time American Sign Language recognition using MobileNetV2 + MediaPipe.
 > Achieves **97%+ accuracy** on the ASL Alphabet dataset.
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15-orange?logo=tensorflow)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green?logo=fastapi)
+![React](https://img.shields.io/badge/React-18-cyan?logo=react)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ---
 
-## Project Structure
+## 🗂️ Project Structure
 
 ```
-sign-language/
+asl-translator/
 ├── data/
 │   ├── raw/                   # Downloaded dataset (not committed)
 │   ├── processed/             # Train / val / test splits
@@ -28,6 +30,23 @@ sign-language/
 │       ├── asl_model.tflite   # Quantized for edge deployment
 │       └── label_map.json     # {"A": 0, "B": 1, ...}
 │
+├── backend/
+│   ├── app/
+│   │   └── main.py            # FastAPI app (HTTP + WebSocket)
+│   └── utils/
+│       ├── predictor.py       # Model inference + MediaPipe hand detection
+│       └── smoother.py        # WebSocket prediction smoother
+│
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx            # Main app component
+│   │   ├── index.css          # Dark sci-fi theme
+│   │   ├── components/        # LetterDisplay, ConfidenceBar, WordDisplay…
+│   │   └── hooks/             # useWebSocket, useWordBuilder
+│   ├── index.html
+│   ├── vite.config.js
+│   └── package.json
+│
 ├── scripts/
 │   ├── preprocess.py          # Dataset cleaning, augmentation, splitting
 │   ├── train.py               # Two-phase MobileNetV2 training
@@ -36,13 +55,15 @@ sign-language/
 ├── notebooks/
 │   └── 01_training_pipeline.ipynb
 │
+├── Dockerfile
+├── docker-compose.yml
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Architecture
+## 🎯 Architecture
 
 ```
 Webcam → MediaPipe Hands → Hand ROI
@@ -68,7 +89,13 @@ Webcam → MediaPipe Hands → Hand ROI
 
 ## 📦 Datasets
 
-**Kaggle ASL Alphabet** (largest, most diverse, RGB, real photos)
+| Dataset | Images | Classes | Link |
+|---------|--------|---------|------|
+| **ASL Alphabet (Kaggle)** ⭐ | 87,000 | 29 (A–Z + space/del/nothing) | [Download](https://www.kaggle.com/grassknoted/asl-alphabet) |
+| ASL MNIST | 34,627 | 24 (no J/Z, motion signs) | [Download](https://www.kaggle.com/datamunge/sign-language-mnist) |
+| Roboflow ASL Letters | 6,285 | 26 | [Download](https://universe.roboflow.com/david-lee-d0rhs/american-sign-language-letters) |
+
+**Recommended: Kaggle ASL Alphabet** (largest, most diverse, RGB, real photos)
 
 ### Download via Kaggle API
 ```bash
@@ -82,16 +109,23 @@ kaggle datasets download grassknoted/asl-alphabet -p data/raw/ --unzip
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.10
+- Python 3.10+
+- Node.js 18+
+- Webcam
 
 ### 1. Clone & Install
 
 ```bash
+git https://github.com/Bodaa74/sign-language.git
+cd sign-language
+
 # Python backend
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
+# React frontend
+cd frontend && npm install && cd ..
 ```
 
 ### 2. Download Dataset & Preprocess
@@ -116,6 +150,27 @@ python scripts/train.py \
 
 Training takes ~30 min on GPU, ~3 hrs on CPU.
 Expected results: **97–98% validation accuracy**.
+
+### 4. Run Locally
+
+**Terminal 1 — Backend:**
+```bash
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+**Terminal 2 — Frontend:**
+```bash
+cd frontend
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+### 5. Standalone OpenCV Detector (no browser needed)
+
+```bash
+python scripts/detect.py --model model/saved/asl_model_final.keras
+```
 
 ---
 
@@ -142,7 +197,7 @@ If validation accuracy < 95%:
 
 ---
 
-## Controls
+## 🎮 Controls
 
 | Key | Action |
 |-----|--------|
@@ -151,8 +206,38 @@ If validation accuracy < 95%:
 | `ENTER` | Clear current word |
 | `Q` (OpenCV mode) | Quit |
 
+---
 
-## Notebooks
+## 🔌 API Reference
+
+### `GET /health`
+Returns model status.
+
+### `GET /labels`
+Returns all 26 class labels.
+
+### `POST /predict`
+Upload a JPEG/PNG image.
+```json
+{"letter": "A", "confidence": 0.982, "top3": [...]}
+```
+
+### `POST /predict/base64`
+Send base64-encoded image from webcam canvas.
+```json
+{"image": "data:image/jpeg;base64,..."}
+```
+
+### `WS /ws/predict`
+Real-time WebSocket. Send frames, receive predictions.
+```json
+// Send:  {"image": "<base64>"}
+// Recv:  {"letter": "B", "confidence": 0.91, "top3": [...], "word": "BALL"}
+```
+
+---
+
+## 📓 Notebooks
 
 | Notebook | Description |
 |----------|-------------|
@@ -164,10 +249,3 @@ jupyter notebook notebooks/
 ```
 
 ---
-
-## Contributing
-
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Commit: `git commit -m 'feat: add my feature'`
-4. Push & open a PR

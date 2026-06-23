@@ -1,10 +1,3 @@
-"""
-🧪 ASL Model Test Suite with Word Formation
-============================================
-Tests model loading, prediction, real-time detection,
-and word accumulation with smart holding mechanism
-"""
-
 import cv2
 import numpy as np
 import json
@@ -21,8 +14,8 @@ IMG_SIZE = 224
 MODEL_PATH = "model/saved/asl_model_final.keras"
 LABEL_PATH = "model/saved/label_map.json"
 CONFIDENCE_THRESHOLD = 0.5
-HOLD_FRAMES = 15  # عدد الإطارات المطلوبة لتثبيت الحرف
-SMOOTHING_WINDOW = 10  # عدد الإطارات للتنعيم
+HOLD_FRAMES = 20
+SMOOTHING_WINDOW = 10
 
 class ASLModelTester:
     def __init__(self, model_path=MODEL_PATH):
@@ -501,21 +494,7 @@ def quick_model_check():
 if __name__ == "__main__":
     import sys
     
-    print("\n" + "✍️"*30)
-    print("ASL SIGN LANGUAGE - WRITE WORDS TEST")
-    print("✍️"*30)
-    print("\nOptions:")
-    print("  1. Quick model check (no camera)")
-    print("  2. Full test with word writing (camera)")
-    print()
-    
-    choice = input("Choose (1-2): ").strip()
-    
-    if choice == '1':
-        quick_model_check()
-    elif choice == '2':
-        tester = ASLModelTester()
-        if tester.model:
-            tester.test_realtime_with_word()
-    else:
-        print("❌ Invalid choice!")
+    tester = ASLModelTester()
+    if tester.model:
+        tester.test_realtime_with_word()
+            
