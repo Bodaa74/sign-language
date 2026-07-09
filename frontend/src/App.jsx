@@ -11,33 +11,74 @@ import ControlPanel from "./components/ControlPanel";
 import "./index.css";
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws/predict";
-const FRAME_INTERVAL_MS = 80;   // ~12 fps to backend
+const FRAME_INTERVAL_MS = 80;
+const STABLE_FRAMES_TO_APPEND = 18;
+const MIN_APPEND_CONFIDENCE = 0.65;
 
 export default function App() {
   const webcamRef = useRef(null);
   const intervalRef = useRef(null);
+  const waitingForReleaseRef = useRef(false);
 
-  const [isActive, setIsActive]       = useState(false);
-  const [prediction, setPrediction]   = useState({ letter: "", confidence: 0, top3: [] });
-  const [sentence, setSentence]       = useState("");
+  const [isActive, setIsActive] = useState(false);
+  const [prediction, setPrediction] = useState({
+    letter: "",
+    confidence: 0,
+    top3: [],
+    candidateLetter: "",
+    candidateConfidence: 0,
+    handDetected: false,
+    frameId: 0,
+  });
+  const [sentence, setSentence] = useState("");
 
-  const { word, appendLetter, deleteLetter, clearWord, spaceWord } = useWordBuilder();
+  const { word, appendLetter, deleteLetter, clearWord } = useWordBuilder();
+
+  const resetPrediction = useCallback(() => {
+    setPrediction({
+      letter: "",
+      confidence: 0,
+      top3: [],
+      candidateLetter: "",
+      candidateConfidence: 0,
+      handDetected: false,
+      frameId: 0,
+    });
+  }, []);
 
   const { sendMessage, status: wsStatus } = useWebSocket(WS_URL, {
     onMessage: (data) => {
-      const parsed = JSON.parse(data);
+      let parsed;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        return;
+      }
+
+      if (parsed.error) return;
+
+      if (waitingForReleaseRef.current) {
+        if (!parsed.hand_detected) {
+          waitingForReleaseRef.current = false;
+        }
+        resetPrediction();
+        return;
+      }
+
       if (parsed.letter !== undefined) {
         setPrediction({
-          letter:     parsed.letter,
+          letter: parsed.letter,
           confidence: parsed.confidence,
-          top3:       parsed.top3 || [],
+          top3: parsed.top3 || [],
+          candidateLetter: parsed.candidate_letter || parsed.top3?.[0]?.letter || "",
+          candidateConfidence: parsed.candidate_confidence || parsed.top3?.[0]?.confidence || 0,
+          handDetected: Boolean(parsed.hand_detected),
+          frameId: Date.now(),
         });
       }
-      // word is managed server-side too but we also manage locally
     },
   });
 
-  // Capture and send frames
   const captureFrame = useCallback(() => {
     if (!webcamRef.current || wsStatus !== "open") return;
     const imageSrc = webcamRef.current.getScreenshot({ width: 640, height: 480 });
@@ -50,17 +91,20 @@ export default function App() {
       intervalRef.current = setInterval(captureFrame, FRAME_INTERVAL_MS);
     } else {
       clearInterval(intervalRef.current);
-      setPrediction({ letter: "", confidence: 0, top3: [] });
+      waitingForReleaseRef.current = false;
+      resetPrediction();
     }
     return () => clearInterval(intervalRef.current);
-  }, [isActive, captureFrame]);
+  }, [isActive, captureFrame, resetPrediction]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
       if (e.code === "Space") {
         e.preventDefault();
-        if (word) { setSentence(s => s + word + " "); clearWord(); }
+        if (word) {
+          setSentence((s) => s + word + " ");
+          clearWord();
+        }
       } else if (e.code === "Backspace") {
         deleteLetter();
       } else if (e.code === "Enter") {
@@ -71,33 +115,44 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [word, clearWord, deleteLetter]);
 
-  // Auto-append stable letter (local fallback, server does this too)
   const stableRef = useRef({ letter: "", count: 0 });
   useEffect(() => {
-    if (!prediction.letter) { stableRef.current = { letter: "", count: 0 }; return; }
+    if (!prediction.handDetected || !prediction.letter || prediction.confidence < MIN_APPEND_CONFIDENCE) {
+      stableRef.current = { letter: "", count: 0 };
+      return;
+    }
+
     if (prediction.letter === stableRef.current.letter) {
       stableRef.current.count++;
-      if (stableRef.current.count === 15) {
+      if (stableRef.current.count === STABLE_FRAMES_TO_APPEND) {
         appendLetter(prediction.letter);
+        waitingForReleaseRef.current = true;
+        stableRef.current = { letter: "", count: 0 };
+        resetPrediction();
       }
     } else {
       stableRef.current = { letter: prediction.letter, count: 0 };
     }
-  }, [prediction.letter, appendLetter]);
+  }, [prediction.letter, prediction.frameId, appendLetter]);
+
+  const finalizeWord = () => {
+    if (!word) return;
+    setSentence((s) => s + word + " ");
+    clearWord();
+  };
 
   return (
     <div className="app">
       <header className="app-header">
         <div className="logo">
-          <span className="logo-icon">🤟</span>
+          <span className="logo-icon">ASL</span>
           <h1>ASL Translator</h1>
-          <span className="logo-sub">A – Z</span>
+          <span className="logo-sub">A-Z</span>
         </div>
         <StatusBar wsStatus={wsStatus} isActive={isActive} />
       </header>
 
       <main className="app-main">
-        {/* Left panel — Camera */}
         <section className="camera-panel">
           <div className="camera-wrapper">
             <Webcam
@@ -109,7 +164,7 @@ export default function App() {
             />
             {!isActive && (
               <div className="camera-overlay">
-                <span className="camera-overlay-icon">📷</span>
+                <span className="camera-overlay-icon">CAM</span>
                 <p>Click START to begin detection</p>
               </div>
             )}
@@ -122,25 +177,33 @@ export default function App() {
 
           <ControlPanel
             isActive={isActive}
-            onToggle={() => setIsActive(a => !a)}
-            onSpace={() => { if (word) { setSentence(s => s + word + " "); clearWord(); } }}
+            onToggle={() => setIsActive((a) => !a)}
+            onSpace={finalizeWord}
             onBackspace={deleteLetter}
             onClear={clearWord}
           />
         </section>
 
-        {/* Right panel — Results */}
         <section className="results-panel">
-          <LetterDisplay letter={prediction.letter} />
+          <LetterDisplay
+            letter={prediction.letter}
+            candidateLetter={prediction.candidateLetter}
+            candidateConfidence={prediction.candidateConfidence}
+          />
           <ConfidenceBar confidence={prediction.confidence} top3={prediction.top3} />
           <WordDisplay word={word} sentence={sentence} onClearSentence={() => setSentence("")} />
-          <Suggestions word={word} onSelect={(w) => { setSentence(s => s + w + " "); clearWord(); }} />
+          <Suggestions
+            word={word}
+            onSelect={(w) => {
+              setSentence((s) => s + w + " ");
+              clearWord();
+            }}
+          />
 
-          {/* Hand guide */}
           <div className="hand-guide">
             <h3>ASL Reference</h3>
             <div className="alphabet-grid">
-              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => (
+              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((l) => (
                 <span
                   key={l}
                   className={`alpha-chip ${prediction.letter === l ? "alpha-chip--active" : ""}`}

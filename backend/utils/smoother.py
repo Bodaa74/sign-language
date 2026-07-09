@@ -3,7 +3,7 @@
 from collections import deque, Counter
 
 SMOOTHING_WINDOW  = 8
-CONFIDENCE_THRESH = 0.70
+CONFIDENCE_THRESH = 0.50
 
 
 class WebSocketSmoother:
@@ -11,8 +11,11 @@ class WebSocketSmoother:
         self.history = deque(maxlen=window)
 
     def update(self, label: str, confidence: float) -> tuple[str, float]:
-        if confidence >= CONFIDENCE_THRESH and label:
-            self.history.append(label)
+        if confidence < CONFIDENCE_THRESH or not label:
+            self.reset()
+            return "", 0.0
+
+        self.history.append(label)
         if not self.history:
             return "", 0.0
         counts = Counter(self.history)

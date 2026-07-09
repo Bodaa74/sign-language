@@ -96,7 +96,12 @@ body {
   font-family: var(--font-mono);
   font-size: 12px;
 }
-.status-dot { font-size: 10px; }
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
 .status-label { letter-spacing: 0.05em; }
 .status-active {
   color: var(--red);
@@ -259,6 +264,7 @@ kbd {
   border-radius: var(--radius);
   height: 120px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -267,6 +273,9 @@ kbd {
   border-color: var(--accent);
   box-shadow: 0 0 24px rgba(0, 229, 160, 0.15), inset 0 0 24px rgba(0, 229, 160, 0.04);
 }
+.letter-box--candidate {
+  border-color: var(--yellow);
+}
 .letter-char {
   font-family: var(--font-mono);
   font-size: 72px;
@@ -274,6 +283,15 @@ kbd {
   color: var(--accent);
   line-height: 1;
   transition: all 0.15s ease;
+}
+.letter-box--candidate .letter-char {
+  color: var(--yellow);
+}
+.letter-hint {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: 4px;
 }
 
 /* ── Confidence ── */

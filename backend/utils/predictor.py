@@ -10,8 +10,8 @@ import mediapipe as mp
 from pathlib import Path
 
 IMG_SIZE          = 224
-CONFIDENCE_THRESH = 0.60
-HAND_PADDING      = 30
+CONFIDENCE_THRESH = 0.50
+HAND_PADDING      = 45
 
 
 class ASLPredictor:
@@ -30,7 +30,7 @@ class ASLPredictor:
         self._hands    = self._mp_hands.Hands(
             static_image_mode=True,
             max_num_hands=1,
-            min_detection_confidence=0.65,
+            min_detection_confidence=0.50,
         )
 
     def _extract_hand_roi(self, img_bgr: np.ndarray) -> np.ndarray | None:
@@ -64,6 +64,7 @@ class ASLPredictor:
         Falls back to full-image crop if no hand detected.
         """
         roi = self._extract_hand_roi(img_bgr)
+        hand_detected = roi is not None
 
         if roi is None:
             # Fallback: use center crop of full image
@@ -86,7 +87,10 @@ class ASLPredictor:
         best_conf = float(preds[best_idx])
 
         return {
-            "letter":     self.idx_to_label[best_idx] if best_conf >= CONFIDENCE_THRESH else "",
+            "letter":     self.idx_to_label[best_idx] if hand_detected and best_conf >= CONFIDENCE_THRESH else "",
             "confidence": round(best_conf, 4),
             "top3":       top3,
+            "candidate_letter": self.idx_to_label[best_idx],
+            "candidate_confidence": round(best_conf, 4),
+            "hand_detected": hand_detected,
         }

@@ -185,8 +185,9 @@ async def websocket_predict(websocket: WebSocket):
     smoother = WebSocketSmoother()
     word = ""
     last_stable = ""
+    last_appended = ""
     stable_count = 0
-    HOLD_FRAMES = 12
+    HOLD_FRAMES = 18
 
     try:
         while True:
@@ -197,14 +198,17 @@ async def websocket_predict(websocket: WebSocket):
             if payload.get("type") == "control":
                 action = payload.get("action")
                 if action == "space":
-                    word = ""
+                    word += " "
                     last_stable = ""
+                    last_appended = ""
                 elif action == "backspace":
                     word = word[:-1]
-                    last_stable = word[-1] if word else ""
+                    last_stable = ""
+                    last_appended = word[-1] if word else ""
                 elif action == "clear":
                     word = ""
                     last_stable = ""
+                    last_appended = ""
                 await websocket.send_text(json.dumps({"word": word}))
                 continue
 
@@ -222,22 +226,47 @@ async def websocket_predict(websocket: WebSocket):
                 continue
 
             raw_result = predictor.predict(img)
-            letter, conf = smoother.update(raw_result["letter"], raw_result["confidence"])
+
+            if not raw_result.get("hand_detected", False):
+                smoother.reset()
+                last_stable = ""
+                last_appended = ""
+                stable_count = 0
+                await websocket.send_text(json.dumps({
+                    "letter": "",
+                    "confidence": 0,
+                    "stability": 0,
+                    "top3": raw_result["top3"],
+                    "candidate_letter": "",
+                    "candidate_confidence": 0,
+                    "hand_detected": False,
+                    "word": word,
+                }))
+                continue
+
+            letter, stability = smoother.update(raw_result["letter"], raw_result["confidence"])
 
             # Stability-based auto-append
-            if letter == last_stable and letter != "":
+            if letter and letter == last_stable:
                 stable_count += 1
             else:
-                stable_count = 0
-                last_stable  = letter
+                stable_count = 1 if letter else 0
+                last_stable = letter
+                if not letter:
+                    last_appended = ""
 
-            if stable_count >= HOLD_FRAMES and letter not in ("", last_stable[-1] if len(last_stable) > 1 else ""):
+            if letter and stable_count == HOLD_FRAMES and letter != last_appended:
                 word += letter
+                last_appended = letter
 
             response = {
                 "letter":     letter,
-                "confidence": round(conf, 4),
+                "confidence": raw_result["confidence"],
+                "stability":  round(stability, 4),
                 "top3":       raw_result["top3"],
+                "candidate_letter": raw_result.get("candidate_letter", ""),
+                "candidate_confidence": raw_result.get("candidate_confidence", 0),
+                "hand_detected": raw_result.get("hand_detected", False),
                 "word":       word,
             }
             await websocket.send_text(json.dumps(response))
