@@ -14,11 +14,14 @@ const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws/predict";
 const FRAME_INTERVAL_MS = 80;
 const STABLE_FRAMES_TO_APPEND = 18;
 const MIN_APPEND_CONFIDENCE = 0.65;
+const RELEASE_COOLDOWN_MS = 300;
 
 export default function App() {
   const webcamRef = useRef(null);
   const intervalRef = useRef(null);
   const waitingForReleaseRef = useRef(false);
+  const releaseUntilRef = useRef(0);
+  const lastAppendedLetterRef = useRef("");
 
   const [isActive, setIsActive] = useState(false);
   const [prediction, setPrediction] = useState({
@@ -58,9 +61,23 @@ export default function App() {
       if (parsed.error) return;
 
       if (waitingForReleaseRef.current) {
-        if (!parsed.hand_detected) {
+        const incomingCandidate = parsed.candidate_letter || parsed.top3?.[0]?.letter || "";
+        const canAcceptChangedLetter =
+          parsed.hand_detected &&
+          incomingCandidate &&
+          incomingCandidate !== lastAppendedLetterRef.current &&
+          Date.now() >= releaseUntilRef.current;
+
+        if (!parsed.hand_detected || canAcceptChangedLetter) {
           waitingForReleaseRef.current = false;
+        } else {
+          resetPrediction();
+          return;
         }
+      }
+
+      if (!parsed.hand_detected) {
+        stableRef.current = { letter: "", count: 0 };
         resetPrediction();
         return;
       }
@@ -92,6 +109,8 @@ export default function App() {
     } else {
       clearInterval(intervalRef.current);
       waitingForReleaseRef.current = false;
+      releaseUntilRef.current = 0;
+      lastAppendedLetterRef.current = "";
       resetPrediction();
     }
     return () => clearInterval(intervalRef.current);
@@ -127,13 +146,15 @@ export default function App() {
       if (stableRef.current.count === STABLE_FRAMES_TO_APPEND) {
         appendLetter(prediction.letter);
         waitingForReleaseRef.current = true;
+        releaseUntilRef.current = Date.now() + RELEASE_COOLDOWN_MS;
+        lastAppendedLetterRef.current = prediction.letter;
         stableRef.current = { letter: "", count: 0 };
         resetPrediction();
       }
     } else {
       stableRef.current = { letter: prediction.letter, count: 0 };
     }
-  }, [prediction.letter, prediction.frameId, appendLetter]);
+  }, [prediction.letter, prediction.frameId, appendLetter, resetPrediction]);
 
   const finalizeWord = () => {
     if (!word) return;
